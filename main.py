@@ -1,31 +1,31 @@
 # Standard library imports
 import time
+import json
 from datetime import datetime
 from urllib import request
 
 # Third party imports
-from bs4 import BeautifulSoup
 from twilio.rest import Client
 
 # User-defined constants
-recipient_contact_number = "+911234567890"  # Recipient's phone number for notifications
-tickets_date = "2024-05-18"  # Desired date for ticket notifications, format "YYYY-MM-DD"
-num_of_messages_to_send = 10  # Number of notification messages to send once tickets are available
-interval_between_messages = 60  # Seconds between each notification message
+fixture_dates = ["2025-05-13", "2025-05-17"]  # List of fixture dates to check for ticket availability
+recipient_contact_number = "+91123456789"  # Recipient's phone number for notifications
+num_of_messages_to_send = 2  # Number of notification messages to send once tickets are available
+interval_between_messages = 120  # Seconds between each notification message
 
 # Twilio account details for sending SMS
-account_sid = 'put_your_account_sid_here'  # Twilio account SID
-auth_token = 'put_your_auth_token_here'  # Twilio auth token
+account_sid = '123456789'  # Twilio account SID
+auth_token = 'apikey1234abcdefghij0123456789'  # Twilio auth token
 client = Client(account_sid, auth_token)  # Twilio client initialization
-twilio_contact_number = "+1234567890"  # Twilio phone number used for sending SMS
+twilio_contact_number = "+123456789"  # Twilio phone number used for sending SMS
 
 # RCB tickets booking page URL
-rcb_tickets_page_url = "https://shop.royalchallengers.com/ticket"
+rcb_ticketgenie_url = "https://rcbmpapi.ticketgenie.in/ticket/eventlist/0"
+rcb_tickets_url = "https://shop.royalchallengers.com/ticket"
 
 # Script execution control variables
-tickets_available = False  # Flag to track ticket availability status
 sent_messages_count = 0  # Counter for messages sent
-fetch_status_delay = 300  # Delay in seconds for script re-execution if tickets are not available
+fetch_status_delay = 150  # Delay in seconds for script re-execution if tickets are not available
 
 
 def getPage(url: str) -> request:
@@ -61,56 +61,33 @@ def getPage(url: str) -> request:
     )
     return request.urlopen(req)
 
+while fixture_dates:
+    ticket_data = getPage(rcb_ticketgenie_url)
+    ticket_data_content = ticket_data.read().decode('utf-8')  # Read the response content once
+    ticket_data_json = json.loads(ticket_data_content)  # Parse the JSON once
+    fixture_name = ticket_data_json['result'][-1].get('event_Name')   # Fetching the latest event name
+    fixture_date = ticket_data_json['result'][-1].get('event_Date')   # Fetching the latest event date
+    formatted_date = datetime.strptime(fixture_date, "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d")  # Formatting the date to "YYYY-MM-DD"
 
-def get_dates_of_available_tickets(tickets_bsobj: BeautifulSoup) -> list:
-    """
-    Extracts and returns a list of dates when tickets are available from the parsed
-    HTML content of the RCB tickets page.
+    if formatted_date == fixture_dates[0]:
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Tickets available. Sending message...")
+        tickets_available = True
 
-    This function searches for <p> elements with a specific class attribute that
-    contain the dates of available tickets, extracts the text content of these
-    elements, and returns a list of these dates.
+        for message_num in range(num_of_messages_to_send):
+            message = client.messages.create(
+                from_=twilio_contact_number,
+                body=f'The match tickets for {str(fixture_name)} on {str(formatted_date)} are available. Login to {rcb_tickets_url} to book the tickets immediately.',
+                to=recipient_contact_number
+            )
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Message sent successfully - {message_num + 1} time(s)")
+            sent_messages_count += 1
 
-    Parameters:
-    - tickets_bsobj (BeautifulSoup): A BeautifulSoup object parsed from the HTML content of the RCB
-      tickets booking page. This object is used to navigate and search the HTML for
-      elements that match specific criteria.
+            if sent_messages_count == num_of_messages_to_send:
+                fixture_dates.pop(0)  # Remove the first date from the list after sending the message
+                break
 
-    Returns:
-    - list: A list of strings, each representing a date when tickets are available.
-    """
-    dates = list()
-    for p in tickets_bsobj.findAll("p", {"class": "css-1nm99ps"}):
-        dates.append(p.text)
-    return dates
+            time.sleep(interval_between_messages)
 
-
-while not tickets_available:
-    tickets_page = getPage(rcb_tickets_page_url)
-    tickets_bsobj = BeautifulSoup(tickets_page, features="html.parser")
-    available_tickets_dates = get_dates_of_available_tickets(tickets_bsobj)
-
-    for available_ticket_date in available_tickets_dates:
-        date_obj = datetime.strptime(available_ticket_date, "%A, %b %d, %Y %I:%M %p")
-        formatted_date = date_obj.strftime("%Y-%m-%d")
-        if formatted_date == tickets_date:
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Tickets available. Sending message...")
-            tickets_available = True
-
-            for message_num in range(num_of_messages_to_send):
-                message = client.messages.create(
-                    from_=twilio_contact_number,
-                    body=f'The match tickets for {tickets_date} are available. Login to {rcb_tickets_page_url} to book the tickets immediately.',
-                    to=recipient_contact_number
-                )
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Message sent successfully - {message_num + 1} time(s)")
-                sent_messages_count += 1
-
-                if sent_messages_count == num_of_messages_to_send:
-                    break
-
-                time.sleep(interval_between_messages)
-
-    if not tickets_available:
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Tickets not available. Retrying in {fetch_status_delay} seconds...")
+    else:
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Tickets not available for match on {str(fixture_dates[0])}. Retrying in {fetch_status_delay} seconds...")
         time.sleep(fetch_status_delay)
